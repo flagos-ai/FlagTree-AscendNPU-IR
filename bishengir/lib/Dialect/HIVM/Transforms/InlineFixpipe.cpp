@@ -108,6 +108,8 @@ public:
   using OpRewritePattern<OpType>::OpRewritePattern;
   LogicalResult matchAndRewrite(OpType op,
                                 PatternRewriter &rewriter) const override {
+    if (op.getResultTensors().empty())
+      return failure();
     auto mmadLikeOpRes = op.getResultTensors()[0];
 
     if (op.shouldDecomposeBiasByElementAdd()) {

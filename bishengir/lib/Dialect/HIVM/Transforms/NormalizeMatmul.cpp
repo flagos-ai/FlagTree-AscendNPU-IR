@@ -254,7 +254,10 @@ private:
 template <typename T>
 LogicalResult decomposeMatmulWithElementwiseAdd(PatternRewriter &rewriter,
                                                 T op) {
-  auto newMmadInit =
+  if (op.getResults().empty()) {
+      return failure();
+ } 
+ auto newMmadInit =
       mlir::utils::createEmptyOp(rewriter, op.getLoc(), op.getC());
   auto newMmad = cast<T>(rewriter.clone(*op.getOperation()));
   newMmad.getCMutable().assign(newMmadInit);

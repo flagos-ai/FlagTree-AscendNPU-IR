@@ -108,10 +108,6 @@ public:
   using OpRewritePattern<OpType>::OpRewritePattern;
   LogicalResult matchAndRewrite(OpType op,
                                 PatternRewriter &rewriter) const override {
-    if (op.getResultTensors().empty())
-      return failure();
-    auto mmadLikeOpRes = op.getResultTensors()[0];
-
     if (op.shouldDecomposeBiasByElementAdd()) {
       // the op will decompose to mmadL1 + vadd, so fixpipe cannot be inserted
       // now, and fixpipe should be inserted after the decomposition
@@ -121,6 +117,7 @@ public:
     if (op->getAttr(fixpipeAlreadyInserted))
       return failure();
 
+    auto mmadLikeOpRes = op.getResultTensors()[0];
     auto isMatchedOp = [](Operation *op, Value v) {
       LDBG("Matching this current op " << *op);
       if (isLocalMatmulInit(op, v)) {

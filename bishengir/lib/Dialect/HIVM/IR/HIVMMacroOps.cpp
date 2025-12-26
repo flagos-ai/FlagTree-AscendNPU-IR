@@ -416,6 +416,10 @@ MatmulBiasMode getMatmulLikeBiasMode(LocalMmadTy localMatmulOp) {
   if (isPerChannelSplitKPattern(matmulOutput))
     return MatmulBiasMode::PerChannelAddWithSplitK;
 
+  auto allocOp = traceDefOp<memref::AllocOp>(matmulOutput.get());
+  if (allocOp.has_value())
+    return MatmulBiasMode::NoBias;
+
   auto emptyOp = traceDefOp<tensor::EmptyOp>(matmulOutput.get());
   if (!emptyOp.has_value()) {
     return MatmulBiasMode::ElementwiseAdd;

@@ -166,20 +166,29 @@ static void modifyStoreToSliced(RewriterBase &rewriter, StoreOp storeOp,
                                 SmallVector<OpFoldResult, 4> mixedSize,
                                 SmallVector<OpFoldResult, 4> mixedStrides,
                                 SmallVector<int64_t, 4> newShape) {
-  auto rankType = cast<RankedTensorType>(storeOp.getSrc().getType());
   auto loc = storeOp->getLoc();
+  Value src = storeOp->getOperand(0);
+  Type srcType = src.getType();
 
-  auto newType =
-      mlir::RankedTensorType::get(newShape, rankType.getElementType());
-  auto slicedStore = rewriter.create<tensor::ExtractSliceOp>(
-      loc, newType, storeOp->getOperand(0), mixedOffsets, mixedSize,
-      mixedStrides);
-  markCreatedExtractSliceOp(rewriter, slicedStore);
+  Value slicedStore;
+  if (auto tensorType = dyn_cast<RankedTensorType>(srcType)) {
+    auto newType = RankedTensorType::get(newShape, tensorType.getElementType());
+    slicedStore = rewriter.create<tensor::ExtractSliceOp>(
+        loc, newType, src, mixedOffsets, mixedSize, mixedStrides);
+  } else if (auto memrefType = dyn_cast<MemRefType>(srcType)) {
+    auto newType = MemRefType::get(newShape, memrefType.getElementType(),
+                                   memrefType.getLayout(),
+                                   memrefType.getMemorySpace());
+    slicedStore = rewriter.create<memref::SubViewOp>(
+        loc, newType, src, mixedOffsets, mixedSize, mixedStrides);
+  }
+
+  markCreatedExtractSliceOp(rewriter, slicedStore.getDefiningOp());
 
   auto initsType = storeOp.getDpsInitOperand(0)->get().getType();
   if (isa<mlir::RankedTensorType>(initsType)) {
     auto slicedInit = rewriter.create<tensor::ExtractSliceOp>(
-        loc, newType, storeOp.getDpsInitOperand(0)->get(), mixedOffsets,
+        loc, cast<RankedTensorType>(slicedStore.getType()), storeOp.getDpsInitOperand(0)->get(), mixedOffsets,
         mixedSize, mixedStrides);
     rewriter.modifyOpInPlace(
         storeOp, [&]() { storeOp.setDpsInitOperand(0, slicedInit); });
@@ -196,7 +205,7 @@ static void modifyStoreToSliced(RewriterBase &rewriter, StoreOp storeOp,
   rewriter.modifyOpInPlace(storeOp, [&]() {
     storeOp->setOperand(0, slicedStore);
     if (storeOp->getNumResults() > 0)
-      storeOp->getResult(0).setType(newType);
+      storeOp->getResult(0).setType(slicedStore.getType());
     storeOp->setAttr(tiledOp, UnitAttr::get(storeOp->getContext()));
   });
 }

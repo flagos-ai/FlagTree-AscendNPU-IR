@@ -495,6 +495,15 @@ bool SyncAnalyzer::IsMemInfoHasDependency(
     CompoundInstanceElement *nowCompound,
     CompoundInstanceElement *frontCompound,
     DepBaseMemInfoPairVec &depBaseMemInfosVec) {
+  constexpr llvm::StringRef attrName = "inter_no_alias";
+  bool noAlias = false;
+  if (frontCompound->elementOp->hasAttr(attrName)) {
+      noAlias = mlir::cast<BoolAttr>(
+          frontCompound->elementOp->getAttr(attrName)).getValue();
+  }
+  if (noAlias && nowCompound == frontCompound)
+    return false;
+
   bool hasDependency = memAnalyzer.DepBetween(
       nowCompound->defVec, frontCompound->defVec, depBaseMemInfosVec);
   hasDependency =

@@ -43,6 +43,7 @@ void canonicalizationHIVMPipeline(OpPassManager &pm) {
   pm.nest<func::FuncOp>().addPass(createHIVMOptSinglePointPass());
   pm.nest<func::FuncOp>().addPass(bishengir::createExtendedCanonicalizerPass());
   pm.nest<func::FuncOp>().addPass(memref::createDeadStoreEliminationPass());
+  pm.nest<func::FuncOp>().addPass(memref::createRemoveRedundantCopyPass());
 }
 
 static void

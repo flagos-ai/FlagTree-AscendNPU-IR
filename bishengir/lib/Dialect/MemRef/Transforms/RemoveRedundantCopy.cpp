@@ -110,7 +110,7 @@ private:
     return true;
   }
 
-  void removeCopy(memref::CopyOp copyOp,
+  void removeCopy(CopyOpInterface copyOp,
                   llvm::SmallPtrSet<Operation *, 4> &opsToErase) {
     Value src = copyOp.getSource();
     Value dest = copyOp.getTarget();
@@ -263,7 +263,7 @@ void RemoveRedundantCopyPass::runOnOperation() {
   func::FuncOp func = getOperation();
   llvm::SmallPtrSet<Operation *, 4> opsToErase;
   Liveness live(func);
-  func.walk([&](memref::CopyOp copyOp) { removeCopy(copyOp, opsToErase); });
+  func.walk([&](CopyOpInterface copyOp) { removeCopy(copyOp, opsToErase); });
   for (Operation *op : opsToErase) {
     assert(op->use_empty() &&
            "uses remaining for copy ops, memref allocation and deallocation "

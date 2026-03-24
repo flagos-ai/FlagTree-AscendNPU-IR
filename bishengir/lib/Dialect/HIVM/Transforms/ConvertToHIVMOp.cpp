@@ -248,6 +248,8 @@ struct MemrefCopyOpLowering : public OpRewritePattern<memref::CopyOp> {
       if (implicitTransposeAttr.has_value()) {
         storeOp.setMayImplicitTransposeWithLastAxis(true);
       }
+
+      storeOp->setAttrs(copyOp->getAttrs());
       return success();
     }
 

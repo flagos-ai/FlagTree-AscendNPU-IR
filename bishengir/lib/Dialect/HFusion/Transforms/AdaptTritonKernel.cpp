@@ -319,6 +319,49 @@ struct TritonSortToHFusionSortPattern : public OpRewritePattern<func::CallOp> {
   }
 };
 
+struct TritonArgSortToHFusionArgSortPattern
+    : public OpRewritePattern<func::CallOp> {
+  using OpRewritePattern<func::CallOp>::OpRewritePattern;
+
+  static constexpr StringRef argsortFuncName = "triton_argsort";
+  LogicalResult matchAndRewrite(func::CallOp callOp,
+                                PatternRewriter &rewriter) const override {
+    auto funcOp =
+        mlir::utils::getCalledFunction<func::FuncOp, func::CallOp>(callOp);
+    auto funcName = funcOp.getSymName();
+    if (!funcName.starts_with(argsortFuncName)) {
+      return rewriter.notifyMatchFailure(
+          callOp,
+          funcName + " does not starts with the prefix " + argsortFuncName);
+    }
+
+    auto loc = callOp.getLoc();
+    Value src = callOp.getOperand(0);
+    Value sortAxisVals = callOp.getOperand(1);
+    auto sortAxis = mlir::utils::getArithConstantOpValue<int64_t>(sortAxisVals);
+    if (failed(sortAxis)) {
+      return callOp->emitError("Failed to extract the value of arith.constant"
+                               "defining the sort axis.");
+    }
+    Value descendingVals = callOp.getOperand(2);
+    auto descending =
+        mlir::utils::getArithConstantOpValue<bool>(descendingVals);
+    if (failed(descending)) {
+      return callOp->emitError("Failed to extract the value of arith.constant"
+                               "defining the descending.");
+    }
+
+    auto srcTy = cast<RankedTensorType>(src.getType());
+    auto idxTy = RankedTensorType::get(
+        srcTy.getShape(), rewriter.getIntegerType(32));
+    auto argsortOp = rewriter.create<hfusion::ArgSortOp>(
+        loc, TypeRange{srcTy, idxTy}, src, *descending, *sortAxis);
+    rewriter.replaceOp(callOp, argsortOp.getResults());
+    rewriter.eraseOp(funcOp);
+    return success();
+  }
+};
+
 struct TritonFlipToHFusionFlipPattern : public OpRewritePattern<func::CallOp> {
   using OpRewritePattern<func::CallOp>::OpRewritePattern;
 
@@ -392,7 +435,8 @@ void AdaptTritonKernelPass::runOnOperation() {
       .add<TritonPrintToHFusionPrintPattern, TritonAssertToHFusionAssertPattern,
            TritonGatherToHFusionGatherPattern, TritonCumToHFusionCumPattern,
            TritonBindSubBlockAttrToHFusionPattern,
-           TritonSortToHFusionSortPattern, TritonFlipToHFusionFlipPattern>(
+           TritonSortToHFusionSortPattern, TritonArgSortToHFusionArgSortPattern,
+           TritonFlipToHFusionFlipPattern>(
           patterns.getContext());
   if (failed(applyPatternsGreedily(module, std::move(patterns)))) {
     signalPassFailure();

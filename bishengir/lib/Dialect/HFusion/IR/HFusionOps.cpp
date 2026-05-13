@@ -2344,6 +2344,27 @@ LogicalResult SortOp::verify() {
 }
 
 //===----------------------------------------------------------------------===//
+// ArgSortOp
+//===----------------------------------------------------------------------===//
+
+int64_t ArgSortOp::getSignedSortAxis() {
+  return getSortAxisAttr().getValue().getSExtValue();
+}
+
+LogicalResult ArgSortOp::verify() {
+  int64_t sortAxis = getSignedSortAxis();
+  ShapedType srcVecType = cast<ShapedType>(getSrc().getType());
+  if (sortAxis != srcVecType.getRank() - 1 && sortAxis != -1) {
+    return emitOpError() << "Currently only tail axis sorting is supported";
+  }
+  auto idxType = cast<ShapedType>(getSortedIndices().getType());
+  if (!idxType.getElementType().isInteger(32)) {
+    return emitOpError() << "sorted_indices must have i32 element type";
+  }
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // HistogramOp
 //===----------------------------------------------------------------------===//
 LogicalResult HistogramOp::verify() {

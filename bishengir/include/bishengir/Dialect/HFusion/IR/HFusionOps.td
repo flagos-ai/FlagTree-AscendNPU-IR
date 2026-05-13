@@ -495,6 +495,37 @@ def SortOp : HFusion_Op<"sort",
 }
 
 //===----------------------------------------------------------------------===//
+// ArgSortOp
+//===----------------------------------------------------------------------===//
+def ArgSortOp : HFusion_Op<"argsort",
+    [SameOperandsAndResultRank]> {
+  let summary = "Sort with indices";
+  let description = [{
+    Sort the input tensor and return both sorted values and the original
+    indices corresponding to each sorted element.
+
+    Returns two results:
+      result#0: sorted values (same type as src)
+      result#1: sorted indices (i32)
+  }];
+  let arguments = (ins TensorOrMemref:$src,
+                       DefaultValuedOptionalAttr<BoolAttr, "false">:$descending,
+                       I64Attr:$sort_axis);
+  let results = (outs AnyRankedTensor:$sorted_values,
+                      AnyRankedTensor:$sorted_indices);
+  let assemblyFormat = [{
+    attr-dict `ins` `(` $src `:` type($src) `)`
+    `descending` `=` $descending
+    `sort_axis` `=` $sort_axis
+    `->` type($sorted_values) `,` type($sorted_indices)
+  }];
+  let hasVerifier = 1;
+  let extraClassDeclaration = [{
+    int64_t getSignedSortAxis();
+  }];
+}
+
+//===----------------------------------------------------------------------===//
 // HistogramOp
 //===----------------------------------------------------------------------===//
 def HistogramOp : HFusion_Op<"histogram", [

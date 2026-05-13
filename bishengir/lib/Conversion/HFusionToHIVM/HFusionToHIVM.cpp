@@ -1067,6 +1067,25 @@ struct HFusionToHIVMSortOp : public OpRewritePattern<hfusion::SortOp> {
   }
 };
 
+//===----------------------------------------------------------------------===//
+// HFusionToHIVMArgSortOp
+//===----------------------------------------------------------------------===//
+struct HFusionToHIVMArgSortOp : public OpRewritePattern<hfusion::ArgSortOp> {
+  using OpRewritePattern<hfusion::ArgSortOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(hfusion::ArgSortOp op,
+                                PatternRewriter &rewriter) const override {
+    SmallVector<Value> dsts;
+    if (failed(
+            tensor::getOrCreateDestinations(rewriter, op.getLoc(), op, dsts)))
+      return failure();
+    rewriter.replaceOpWithNewOp<hivm::VSortOp>(
+        op, op->getResultTypes(), op.getSrc(), ValueRange{dsts},
+        op.getDescending(), op.getSortAxis());
+    return success();
+  }
+};
+
 struct HFusionAttrsLowering : public OpRewritePattern<annotation::MarkOp> {
   using OpRewritePattern<annotation::MarkOp>::OpRewritePattern;
   LogicalResult matchAndRewrite(annotation::MarkOp op,
@@ -1155,6 +1174,7 @@ void populateLowerHFusionToHIVMPattern(RewritePatternSet &patterns) {
     HFusionToHIVMDeinterleaveOp,
     HFusionToHIVMFlipOp,
     HFusionToHIVMSortOp,
+    HFusionToHIVMArgSortOp,
     HFusionToHIVMCumOp<hfusion::CumsumOp, hivm::VCumsumOp>,
     HFusionToHIVMCumOp<hfusion::CumprodOp, hivm::VCumprodOp>,
     HFusionToHIVMAtomicCasOp,

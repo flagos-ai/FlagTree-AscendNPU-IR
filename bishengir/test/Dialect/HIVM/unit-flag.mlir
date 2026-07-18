@@ -1,3 +1,17 @@
+// Copyright 2026 FlagOS Contributors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // RUN: bishengir-opt -split-input-file %s -pass-pipeline="builtin.module(func.func(hivm-inject-sync{enable-unit-flag=true}))" | FileCheck %s --check-prefixes="CHECK,CHECK-UF-ON"
 // RUN: bishengir-opt -split-input-file %s -pass-pipeline="builtin.module(func.func(hivm-inject-sync{enable-unit-flag=false}))" | FileCheck %s --check-prefixes="CHECK,CHECK-UF-OFF"
 // RUN: bishengir-opt -split-input-file %s -pass-pipeline="builtin.module(func.func(hivm-graph-sync-solver{enable-unit-flag=false ignore-workspace-func-args=true}))" | FileCheck %s --check-prefixes="CHECK,CHECK-UF-OFF"
@@ -503,4 +517,3 @@ func.func @_fwd_kernel_mix_aic(%arg0: i64 {hacc.arg_type = #hacc.arg_type<ffts_b
   hivm.hir.sync_block_wait[<CUBE>, <PIPE_MTE2>, <PIPE_S>] flag = 7
   return
 }
-

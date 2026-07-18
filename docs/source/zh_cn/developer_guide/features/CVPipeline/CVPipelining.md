@@ -1,3 +1,19 @@
+<!--
+ Copyright 2026 FlagOS Contributors
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ -->
+
 # Cube-Vector 软件流水优化
 
 本文介绍HIVM中的CV Pipelining `Pass`。该`Pass`针对CV类`kernel`进行优化。在阅读本文之前，建议先阅读[CV Optimization](../CV/CVOptimization.md)，了解CV编译相关术语。

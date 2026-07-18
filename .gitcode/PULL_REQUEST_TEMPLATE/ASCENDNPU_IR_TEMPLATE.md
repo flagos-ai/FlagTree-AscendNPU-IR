@@ -2,6 +2,23 @@
 title: "[AscendNPU IR]:"
 ---
 
+<!--
+ Copyright 2026 FlagOS Contributors
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ -->
+
+
 ## 描述 Description
 请提供此 Pull Request 的高级别说明。
 Please describe what this PR is about.
@@ -20,4 +37,3 @@ Please describe what this PR is about.
 - [ ] 我已经更新了相应的文档 I have updated the relevant documentation
 - [ ] 我已经根据需要更新了对应的变更日志 I have updated the changelog as needed
 - [ ] 我已经在标题中正确使用了类型标签（例如：`feat:`, `fix:`）I have correctly used type labels in the title (e.g., feat:, fix:)
-

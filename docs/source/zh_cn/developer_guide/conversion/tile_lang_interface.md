@@ -1,3 +1,19 @@
+<!--
+ Copyright 2026 FlagOS Contributors
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+ -->
+
 # `TileLang` 接入
 
 `Tile Language Ascend`（`tilelang-ascend`）是`tile-lang`领域特定语言针对华为昇腾`NPU`（神经网络处理器）架构的专用变体，经过专门优化。它基于`tile-lang`的`Python`式语法和[TVM](https://tvm.apache.org/)编译器基础架构，使开发者能够高效地为昇腾处理器（包括`GEMM`、向量运算和注意力机制等操作）创建高性能`AI`计算内核。`tilelang-ascend`让开发者能够专注于生产效率，同时不牺牲在`NPU`上实现前沿性能所需的底层优化。

@@ -1,3 +1,17 @@
+// Copyright 2026 FlagOS Contributors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // RUN: bishengir-opt -hfusion-legalize-bool %s -split-input-file -verify-diagnostics | FileCheck %s
 
 // CHECK-LABEL: @some_kernel_entry(%arg0: i8, %arg1: i32, %arg2: i8, %arg3: f32, %arg4: i8, %arg5: i32) -> (i8, i32)

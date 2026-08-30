@@ -461,8 +461,12 @@ struct FoldLoadAndVPadPattern : public OpRewritePattern<VPadOp> {
     Value rightPad =
         createPaddingValue(rewriter, padOp, /*isLow=*/false, /*dim=*/0);
     auto padModeAttr = rewriter.getAttr<PadModeAttr>(PadMode::PadValue);
-    rewriter.replaceOpWithNewOp<hivm::LoadOp>(
-        padOp, resType, src, dst, padModeAttr, padValue, leftPad, rightPad);
+    auto newLoad = rewriter.create<hivm::LoadOp>(
+        padOp.getLoc(), resType, src, dst, padModeAttr, padValue, leftPad,
+        rightPad);
+    if (auto attr = loadOp->getAttr("l2_cache_mode"))
+      newLoad->setAttr("l2_cache_mode", attr);
+    rewriter.replaceOp(padOp, newLoad);
     return success();
   }
 };

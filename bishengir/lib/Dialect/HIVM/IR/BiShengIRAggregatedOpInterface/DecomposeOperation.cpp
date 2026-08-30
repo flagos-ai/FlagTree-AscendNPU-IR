@@ -526,9 +526,11 @@ FailureOr<SmallVector<Value>> LoadOp::decomposeOperation(OpBuilder &b) {
     b.create<hivm::VBrcOp>(loc, TypeRange(), getPadValue(), *padBuffer,
                            b.getDenseI64ArrayAttr(ArrayRef<int64_t>{}));
   }
-  b.create<hivm::LoadOp>(loc, TypeRange{}, getSrc(), getDst(), getPadModeAttr(),
-                         getPadValue(), getLeftPaddingNum(), false,
-                         getMayImplicitTransposeWithLastAxis());
+  auto loadOp = b.create<hivm::LoadOp>(
+      loc, TypeRange{}, getSrc(), getDst(), getPadModeAttr(), getPadValue(),
+      getLeftPaddingNum(), false, getMayImplicitTransposeWithLastAxis());
+  if (auto attr = (*this)->getAttr("l2_cache_mode"))
+    loadOp->setAttr("l2_cache_mode", attr);
   return SmallVector<Value>{};
 }
 

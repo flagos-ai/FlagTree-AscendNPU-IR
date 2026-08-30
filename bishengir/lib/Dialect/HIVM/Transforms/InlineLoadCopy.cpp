@@ -302,10 +302,23 @@ struct LoadCopyInlinePattern : public OpRewritePattern<hivm::CopyOp> {
           copyOp, "Cannot optimize, source buffer is used");
     }
 
-    rewriter.replaceOpWithNewOp<hivm::LoadOp>(
-        copyOp, TypeRange{}, matchedLoad.getSrc(), copyOp.getDst(),
+    // Keep the load's policy. A copy hint may supplement an unhinted load,
+    // but conflicting hints are rejected rather than silently merged. Validate
+    // before creating the replacement so a failed match leaves IR unchanged.
+    auto loadAttr = matchedLoad->getAttr("l2_cache_mode");
+    auto copyAttr = copyOp->getAttr("l2_cache_mode");
+    if (loadAttr && copyAttr && loadAttr != copyAttr)
+      return rewriter.notifyMatchFailure(copyOp, "conflicting l2_cache_mode");
+
+    auto newLoad = rewriter.create<hivm::LoadOp>(
+        copyOp.getLoc(), TypeRange{}, matchedLoad.getSrc(), copyOp.getDst(),
         matchedLoad.getPadModeAttr(), matchedLoad.getPadValue(),
         matchedLoad.getLeftPaddingNum(), matchedLoad.getRightPaddingNum());
+    if (loadAttr)
+      newLoad->setAttr("l2_cache_mode", loadAttr);
+    else if (copyAttr)
+      newLoad->setAttr("l2_cache_mode", copyAttr);
+    rewriter.replaceOp(copyOp, newLoad);
     rewriter.eraseOp(matchedLoad);
     return success();
   }
@@ -321,7 +334,8 @@ public:
 void InlineLoadCopyPass::runOnOperation() {
   RewritePatternSet patterns(&getContext());
   patterns.add<LoadCopyInlinePattern>(patterns.getContext());
-  (void)applyPatternsGreedily(getOperation(), std::move(patterns));
+  if (failed(applyPatternsGreedily(getOperation(), std::move(patterns))))
+    signalPassFailure();
 }
 
 std::unique_ptr<Pass> mlir::hivm::createInlineLoadCopyPass() {

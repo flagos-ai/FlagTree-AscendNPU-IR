@@ -162,9 +162,12 @@ static func::CallOp createLibCall(PatternRewriter &rewriter, Operation *op,
     }
   }
 
-  return rewriter.create<func::CallOp>(
+  auto call = rewriter.create<func::CallOp>(
       loc, fnNameAttr.getValue(), resultTypes,
       createTypeCanonicalizedMemRefOperands(rewriter, loc, inputOperands));
+  if (Attribute attr = op->getAttr("l2_cache_mode"))
+    call->setAttr("l2_cache_mode", attr);
+  return call;
 }
 
 template <typename OpType>

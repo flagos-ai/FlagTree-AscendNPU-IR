@@ -19,6 +19,7 @@
 #include "bishengir/Dialect/HACC/IR/HACC.h"
 #include "bishengir/Dialect/HACC/Utils/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/HIVM/Transforms/DistributedTransformUtils.h"
 #include "bishengir/Dialect/HIVM/Transforms/Passes.h"
 #include "bishengir/Dialect/HIVM/Utils/Utils.h"
 #include "bishengir/Dialect/Utils/Util.h"
@@ -49,6 +50,43 @@ namespace {
 //===---------------------------------------------------------------------===//
 // Patterns that convert ops from other dialects to HIVM ops.
 //===---------------------------------------------------------------------===//
+
+inline bool isFromDistCallResult(mlir::Value v) {
+  auto *srcOp = utils::tracebackMemRef(v).getDefiningOp();
+  if (!srcOp)
+    return false;
+  if (hivm::isDistributedTypeCustomOp(srcOp)) {
+    return true;
+  }
+  return false;
+}
+
+static constexpr StringLiteral kL2CacheModeAttr = "l2_cache_mode";
+
+static LogicalResult validateL2CacheMode(Operation *op) {
+  Attribute rawAttr = op->getAttr(kL2CacheModeAttr);
+  if (!rawAttr)
+    return success();
+  auto attr = dyn_cast<IntegerAttr>(rawAttr);
+  if (!attr || attr.getInt() < 0 || attr.getInt() > 7)
+    return op->emitError("l2_cache_mode must be an integer in [0, 7]");
+  return success();
+}
+
+// Preserve only a valid, unambiguous cache hint. If a destination already
+// carries a different hint, do not guess which alias should win.
+static LogicalResult propagateL2CacheMode(Operation *src, Operation *dst) {
+  auto attr = src->getAttrOfType<IntegerAttr>(kL2CacheModeAttr);
+  if (!attr)
+    return success();
+  if (Attribute existing = dst->getAttr(kL2CacheModeAttr)) {
+    if (existing != attr)
+      return dst->emitError("conflicting l2_cache_mode attributes");
+    return success();
+  }
+  dst->setAttr(kL2CacheModeAttr, attr);
+  return success();
+}
 
 std::optional<Value>
 getPadValueForSingleValue(std::optional<Operation *> allocOpAlias) {
@@ -180,8 +218,12 @@ LogicalResult replaceMemCopyByHIVMLoadOp(memref::CopyOp copyOp,
   auto maybePadValue = getPadValue(allocOpAliases);
   auto maybeLeftPadNum = getLeftPadNum(rewriter, allocOpAliases);
 
+  if (failed(validateL2CacheMode(copyOp)))
+    return failure();
   auto loadOp = rewriter.create<hivm::LoadOp>(copyOp->getLoc(), TypeRange(),
                                               copyOp.getSource(), dst);
+  if (failed(propagateL2CacheMode(copyOp, loadOp)))
+    return failure();
   if (maybeLeftPadNum.has_value()) {
     loadOp.getLeftPaddingNumMutable().assign(maybeLeftPadNum.value());
   }
@@ -236,26 +278,39 @@ struct MemrefCopyOpLowering : public OpRewritePattern<memref::CopyOp> {
   LogicalResult matchAndRewrite(memref::CopyOp copyOp,
                                 PatternRewriter &rewriter) const override {
     Value src = copyOp.getSource();
-    bool convertToLoad = isFromGMSpace(src);
+    // TODO：remove memref.copy conversion after changing to use
+    // hivm.load/hivm.store directly
+    bool convertToLoad = isFromGMSpace(src) || isFromDistCallResult(src);
     if (convertToLoad) {
       return replaceMemCopyByHIVMLoadOp(copyOp, rewriter);
     }
 
     Value dst = copyOp.getTarget();
-    bool convertToStore = isFromGMSpace(dst);
+    // TODO：remove memref.copy conversion after changing to use
+    // hivm.load/hivm.store directly
+    bool convertToStore = isFromGMSpace(dst) || isFromDistCallResult(dst);
+    if (failed(validateL2CacheMode(copyOp)))
+      return failure();
     if (convertToStore) {
-      auto storeOp = rewriter.replaceOpWithNewOp<hivm::StoreOp>(
-          copyOp, TypeRange(), src, dst);
+      auto storeOp = rewriter.create<hivm::StoreOp>(copyOp.getLoc(),
+                                                    TypeRange(), src, dst);
+      if (failed(propagateL2CacheMode(copyOp, storeOp)))
+        return failure();
       // TODO: change TA to create hivm.load/store op directly
       auto implicitTransposeAttr = utils::getAnnotateOpWithAttr(
           dst, "MayImplicitTransposeWithLastAxis");
       if (implicitTransposeAttr.has_value()) {
         storeOp.setMayImplicitTransposeWithLastAxis(true);
       }
+      rewriter.replaceOp(copyOp, storeOp);
       return success();
     }
 
-    rewriter.replaceOpWithNewOp<hivm::CopyOp>(copyOp, TypeRange(), src, dst);
+    auto newCopy = rewriter.create<hivm::CopyOp>(copyOp.getLoc(), TypeRange(),
+                                                 src, dst);
+    if (failed(propagateL2CacheMode(copyOp, newCopy)))
+      return failure();
+    rewriter.replaceOp(copyOp, newCopy);
     return success();
   }
 };
@@ -269,10 +324,17 @@ struct BufferizeMaterializeOpLowering
   matchAndRewrite(bufferization::MaterializeInDestinationOp bufMIDOp,
                   PatternRewriter &rewriter) const override {
     Value dst = bufMIDOp.getDest();
-    bool convertToStore = isFromGMSpace(dst);
+    // TODO：remove bufferization conversion after changing to use
+    // hivm.load/hivm.store directly
+    bool convertToStore = isFromGMSpace(dst) || isFromDistCallResult(dst);
+    if (failed(validateL2CacheMode(bufMIDOp)))
+      return failure();
     if (convertToStore) {
-      rewriter.replaceOpWithNewOp<hivm::StoreOp>(bufMIDOp, TypeRange(),
-                                                 bufMIDOp.getSource(), dst);
+      auto storeOp = rewriter.create<hivm::StoreOp>(
+          bufMIDOp.getLoc(), TypeRange(), bufMIDOp.getSource(), dst);
+      if (failed(propagateL2CacheMode(bufMIDOp, storeOp)))
+        return failure();
+      rewriter.replaceOp(bufMIDOp, storeOp);
       return success();
     }
     return failure();
@@ -293,6 +355,7 @@ struct ConvertToHIVMOpPass
 void ConvertToHIVMOpPass::runOnOperation() {
   auto *ctx = &getContext();
   Operation *moduleOp = getOperation();
+  bool rewriteFailed = false;
   moduleOp->walk([&](func::FuncOp funcOp) {
     if (hacc::utils::isHost(funcOp))
       // avoid convert host op to hivm op
@@ -301,8 +364,11 @@ void ConvertToHIVMOpPass::runOnOperation() {
     // rewrite op within cur funcOp
     RewritePatternSet patterns(ctx);
     populateHIVMOpRewritingRule(patterns);
-    (void)applyPatternsGreedily(funcOp, std::move(patterns));
+    if (failed(applyPatternsGreedily(funcOp, std::move(patterns))))
+      rewriteFailed = true;
   });
+  if (rewriteFailed)
+    signalPassFailure();
 }
 
 std::unique_ptr<Pass> mlir::hivm::createConvertToHIVMOpPass() {

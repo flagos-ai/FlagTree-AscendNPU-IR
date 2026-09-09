@@ -421,6 +421,15 @@ LogicalResult ConvertLayoutOp::verify() {
 //===----------------------------------------------------------------------===//
 
 // CustomOp Methods
+
+// Builder with empty temp_buffers.
+void CustomOp::build(OpBuilder &builder, OperationState &result, StringRef name,
+                     TypeRange resultTypes, ValueRange inputs,
+                     ValueRange outputs) {
+  build(builder, result, resultTypes, name, inputs, outputs,
+        /*temp_buffers=*/ValueRange{});
+}
+
 void CustomOp::setPipe(PIPE pipe) {
   getOperation()->setAttr(PipeAttr::name, PipeAttr::get(getContext(), pipe));
   getMaxRank();

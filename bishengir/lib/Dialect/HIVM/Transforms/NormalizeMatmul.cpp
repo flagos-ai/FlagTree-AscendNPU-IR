@@ -21,9 +21,12 @@
 #include "bishengir/Dialect/HIVM/Utils/Utils.h"
 #include "bishengir/Dialect/Utils/Util.h"
 
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/Dominance.h"
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Value.h"
@@ -128,11 +131,70 @@ struct NormalizeMatmulPass
   void runOnOperation() override;
 };
 
+// A read window of a fully copied allocation has its own logical shape. It is
+// not the write window used to describe a masked/padded load into that alloc.
+FailureOr<SmallVector<Value>> getFullyCopiedReadSubviewShape(
+    Value val, memref::AllocOp rootAlloc, Operation *consumer,
+    PatternRewriter &rewriter) {
+  Value view = val;
+  while (auto *defOp = view.getDefiningOp()) {
+    if (auto toTensor = dyn_cast<bufferization::ToTensorOp>(defOp)) {
+#ifndef __LLVM_MAJOR_VERSION_22_COMPATIBLE__
+      view = toTensor.getMemref();
+#else
+      view = toTensor.getBuffer();
+#endif
+      continue;
+    }
+    if (auto castOp = dyn_cast<memref::CastOp>(defOp)) {
+      view = castOp.getSource();
+      continue;
+    }
+    if (auto castOp = dyn_cast<memref::MemorySpaceCastOp>(defOp)) {
+      view = castOp.getSource();
+      continue;
+    }
+    break;
+  }
+  auto subview = view.getDefiningOp<memref::SubViewOp>();
+  // Keep the new case to direct, rank-preserving read windows. Inferring a
+  // padded extent through nested or rank-changing views needs separate logic.
+  if (!subview || subview.getSource() != rootAlloc.getResult() ||
+      subview.getDroppedDims().any() ||
+      !rootAlloc.getType().hasStaticShape())
+    return failure();
+
+  DominanceInfo dominance(consumer->getParentOfType<func::FuncOp>());
+  for (Operation *user : rootAlloc->getUsers()) {
+    if (!isa<memref::CopyOp, hivm::LoadOp>(user))
+      continue;
+    auto copy = cast<CopyOpInterface>(user);
+    if (copy.getTarget() != rootAlloc.getResult() ||
+        !dominance.properlyDominates(user, consumer))
+      continue;
+    auto srcType = dyn_cast<MemRefType>(copy.getSource().getType());
+    if (!srcType || !srcType.hasStaticShape() ||
+        srcType.getShape() != rootAlloc.getType().getShape())
+      continue;
+    if (auto load = dyn_cast<hivm::LoadOp>(user)) {
+      if (load.getPadModeAttr() || load.getPadValue() ||
+          load.getLeftPaddingNum() || load.getRightPaddingNum() ||
+          load.getInitOutBuffer() || load.getInitCondition())
+        continue;
+    }
+    return getValueListFromMixedTypeLists(
+        subview.getSizes(), subview.getStaticSizes(), consumer->getLoc(),
+        rewriter);
+  }
+  return failure();
+}
+
 // If value is from memref, we get shape from memref.subview or memref.alloc.
 // If value is from tensor, we get shape from value directly.
 FailureOr<SmallVector<Value>>
-getRealShapeFromMemrefOrTensor(Value val, Location loc,
+getRealShapeFromMemrefOrTensor(Value val, Operation *consumer,
                                PatternRewriter &rewriter) {
+  Location loc = consumer->getLoc();
   FailureOr<memref::AllocOp> status = getMemRefAlloc(val);
   if (failed(status)) {
     SmallVector<Value> tensorMixedSizes;
@@ -159,6 +221,12 @@ getRealShapeFromMemrefOrTensor(Value val, Location loc,
   // Filter the SubViewOps that is NOT written into.
   candidateSubViews.erase(llvm::remove_if(candidateSubViews, isNotWritten),
                           candidateSubViews.end());
+  if (candidateSubViews.empty()) {
+    auto readShape =
+        getFullyCopiedReadSubviewShape(val, rootAlloc, consumer, rewriter);
+    if (succeeded(readShape))
+      return readShape;
+  }
   if (candidateSubViews.size() != 1) {
     LDBG("candidate subview size : " << candidateSubViews.size());
     return rootAlloc.emitError("Don't support the case when the root alloc "
@@ -180,18 +248,17 @@ getRealShapeFromMemrefOrTensor(Value val, Location loc,
 
 template <typename T>
 FailureOr<SmallVector<Value>> extractRealMKN(T op, PatternRewriter &rewriter) {
-  auto loc = op.getLoc();
   SmallVector<Value> mkn;
   size_t batchIndexBias = 0;
   if constexpr (std::is_same_v<T, hivm::BatchMmadL1Op>) {
     batchIndexBias = 1;
   }
-  auto realMK = getRealShapeFromMemrefOrTensor(op.getA(), loc, rewriter);
+  auto realMK = getRealShapeFromMemrefOrTensor(op.getA(), op, rewriter);
   const int matrixSize = 2;
   if (failed(realMK) || (*realMK).size() != matrixSize + batchIndexBias) {
     return failure();
   }
-  auto realKN = getRealShapeFromMemrefOrTensor(op.getB(), loc, rewriter);
+  auto realKN = getRealShapeFromMemrefOrTensor(op.getB(), op, rewriter);
   if (failed(realKN) || (*realKN).size() != matrixSize + batchIndexBias) {
     return failure();
   }

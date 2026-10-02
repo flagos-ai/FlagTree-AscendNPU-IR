@@ -37,6 +37,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "llvm/ADT/STLExtras.h"
 
 namespace mlir {
 #define GEN_PASS_DEF_CONVERTTOHIVMOP
@@ -91,29 +92,36 @@ std::optional<Value> getPadValue(const SmallVector<Value> &allocOpAliases) {
 }
 
 std::optional<Value>
-getLeftPadNumForSingleValue(PatternRewriter &rewriter,
-                            std::optional<Operation *> allocOpAlias) {
-  if (!allocOpAlias.has_value())
-    return std::nullopt;
-
-  for (auto *user : allocOpAlias.value()->getUsers()) {
-    if (auto subviewOp = llvm::dyn_cast<memref::SubViewOp>(user)) {
+getLeftPadNum(PatternRewriter &rewriter, Value dst,
+              const SmallVector<Value> &allocOpAliases) {
+  // Padding belongs to the copy destination, not to an arbitrary subview
+  // consuming the same allocation. In particular, a later consumer may use
+  // an offset defined inside a loop that does not dominate this copy.
+  while (auto *defOp = dst.getDefiningOp()) {
+    if (auto castOp = llvm::dyn_cast<memref::CastOp>(defOp)) {
+      dst = castOp.getSource();
+      continue;
+    }
+    if (auto castOp = llvm::dyn_cast<memref::MemorySpaceCastOp>(defOp)) {
+      dst = castOp.getSource();
+      continue;
+    }
+    if (auto subviewOp = llvm::dyn_cast<memref::SubViewOp>(defOp)) {
+      // Preserve the existing inference scope: the target must be a direct
+      // subview of one of the previously traced anchors. Do not infer new
+      // padding through nested subviews or other intervening view operations.
+      Value source = subviewOp.getSource();
+      if (!source.getDefiningOp() ||
+          !llvm::is_contained(allocOpAliases, source))
+        return std::nullopt;
       auto offsets = subviewOp.getMixedOffsets();
-      return mlir::getValueOrCreateConstantIndexOp(
-          rewriter, subviewOp->getLoc(), offsets.back());
+      if (!offsets.empty())
+        return mlir::getValueOrCreateConstantIndexOp(
+            rewriter, subviewOp->getLoc(), offsets.back());
     }
-  }
-  return std::nullopt;
-}
-
-std::optional<Value> getLeftPadNum(PatternRewriter &rewriter,
-                                   const SmallVector<Value> &allocOpAliases) {
-  for (const auto &allocOpAlias : allocOpAliases) {
-    auto defOp = allocOpAlias.getDefiningOp();
-    auto leftPadValue = getLeftPadNumForSingleValue(rewriter, defOp);
-    if (leftPadValue.has_value()) {
-      return leftPadValue;
-    }
+    // Do not traverse rank-changing views: their source's last dimension
+    // need not be the destination's last dimension.
+    break;
   }
   return std::nullopt;
 }
@@ -189,7 +197,7 @@ LogicalResult replaceMemCopyByHIVMLoadOp(memref::CopyOp copyOp,
   // }
   auto allocOpAliases = utils::tracebackMemRefAllocAndAlias(dst);
   auto maybePadValue = getPadValue(allocOpAliases);
-  auto maybeLeftPadNum = getLeftPadNum(rewriter, allocOpAliases);
+  auto maybeLeftPadNum = getLeftPadNum(rewriter, dst, allocOpAliases);
 
   auto loadOp = rewriter.create<hivm::LoadOp>(copyOp->getLoc(), TypeRange(),
                                               copyOp.getSource(), dst);

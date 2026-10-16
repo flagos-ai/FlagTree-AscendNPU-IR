@@ -183,7 +183,10 @@ static void hivmPreBufferizationOptimizationPipeline(
     pm.addPass(createAutoBlockifyParallelLoopPass());
   }
 
-  if (!hivmPipelineOptions.disableAutoCVWorkSpaceManage) {
+  // disableAutoCVWorkSpaceManage is the custom-pipeline switch
+  // disableMultiBuffer is used for O0 pass pipeline
+  if (!hivmPipelineOptions.disableAutoCVWorkSpaceManage &&
+      !hivmPipelineOptions.disableMultiBuffer) {
     MarkMultiBufferOptions multiBufferOptions;
     multiBufferOptions.enableAuto = hivmPipelineOptions.enableAutoMultiBuffer;
     multiBufferOptions.limitAutoMultiBufferOnlyForLocalBuffer =
@@ -201,7 +204,10 @@ static void hivmPreBufferizationOptimizationPipeline(
   // broadcasts.
   pm.addPass(bishengir::createExtendedCanonicalizerPass());
   pm.nest<func::FuncOp>().addPass(createInlineOTFBroadcastPass());
-  if (!hivmPipelineOptions.disableAutoCVWorkSpaceManage) {
+  // disableAutoCVWorkSpaceManage is the custom-pipeline switch
+  // disableCVPipelining is used for O0 pass pipeline
+  if (!hivmPipelineOptions.disableAutoCVWorkSpaceManage &&
+      !hivmPipelineOptions.disableCVPipelining) {
     // Software pipelining Cube and Vector operations
     CVPipeliningOptions pipelineOptions;
     pipelineOptions.enableAutoBalance =
@@ -339,7 +345,8 @@ static void hivmPostBufferizationOptimizationPipeline(
       bishengir::DecomposePhase::AFTER_HIVM_FLATTEN_OPS;
   pm.nest<func::FuncOp>().addPass(
       createHIVMAggregatedDecomposeOpPass(decomposeOption));
-  pm.nest<func::FuncOp>().addPass(createReduceRankSubviewPass());
+  if (!hivmPipelineOptions.disableReduceRankSubview)
+    pm.nest<func::FuncOp>().addPass(createReduceRankSubviewPass());
   pm.nest<func::FuncOp>().addPass(createLiftLowestStridePass());
   decomposeOption.decomposePhase =
       bishengir::DecomposePhase::AFTER_LIFT_LOWEST_STRIDE;
@@ -349,7 +356,8 @@ static void hivmPostBufferizationOptimizationPipeline(
   // Infer memory scope for newly allocated extra buffer
   pm.addPass(createInferHIVMMemScopePass());
   canonicalizationHIVMPipeline(pm);
-  pm.nest<func::FuncOp>().addPass(createInlineLoadCopyPass());
+  if (!hivmPipelineOptions.disableInlineLoadCopy)
+    pm.nest<func::FuncOp>().addPass(createInlineLoadCopyPass());
 
   MarkMultiBufferOptions multiBufferOptions;
   multiBufferOptions.enableAuto = hivmPipelineOptions.enableAutoMultiBuffer;
@@ -359,8 +367,9 @@ static void hivmPostBufferizationOptimizationPipeline(
       hivmPipelineOptions.limitAutoMultiBufferOfLocalBuffer;
   multiBufferOptions.limitMixAutoMultiBufferBuffer =
       hivmPipelineOptions.limitAutoMultiBufferBuffer;
-  pm.nest<func::FuncOp>().addPass(
-      createMarkMultiBufferPass(multiBufferOptions));
+  if (!hivmPipelineOptions.disableMultiBuffer)
+    pm.nest<func::FuncOp>().addPass(
+        createMarkMultiBufferPass(multiBufferOptions));
   PlanMemoryOptions planMemoryOption;
   planMemoryOption.enableMemoryDisplay =
       hivmPipelineOptions.enableMemoryDisplay;
@@ -377,7 +386,8 @@ static void hivmPostBufferizationOptimizationPipeline(
   hivmNormSyncPipeline(pm, hivmPipelineOptions);
   pm.addPass(mlir::createMemrefExtLoweringPass());
   pm.nest<func::FuncOp>().addPass(createAddFFTSToSyncBlockSetOpPass());
-  pm.nest<func::FuncOp>().addPass(createEnableMultiBufferPass());
+  if (!hivmPipelineOptions.disableMultiBuffer)
+    pm.nest<func::FuncOp>().addPass(createEnableMultiBufferPass());
   pm.nest<func::FuncOp>().addPass(createLiftLowestStridePass());
 }
 

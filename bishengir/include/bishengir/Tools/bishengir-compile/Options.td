@@ -466,6 +466,31 @@ def EnablePreload : HIVMOptimizationControlOptions<
   "false"
 >;
 
+def DisableCVPipelining : HIVMOptimizationControlOptions<
+  "Disable the cv-pipelining pass in the HIVM pipeline.",
+  "bool",
+  "false"
+>;
+
+def DisableReduceRankSubview : HIVMOptimizationControlOptions<
+  "Disable the reduce-rank-subview pass in the HIVM pipeline.",
+  "bool",
+  "false"
+>;
+
+def DisableInlineLoadCopy : HIVMOptimizationControlOptions<
+  "Disable the inline-load-copy pass in the HIVM pipeline.",
+  "bool",
+  "false"
+>;
+
+def DisableMultiBuffer : HIVMOptimizationControlOptions<
+  "Disable the multi-buffer passes (mark-multi-buffer and enable-multi-buffer) "
+  "in the HIVM pipeline.",
+  "bool",
+  "false"
+>;
+
 def EnableHIVMAutoStorageAlign : HIVMOptimizationControlOptions<
   "Enable mark/enable storage align.",
   "bool",

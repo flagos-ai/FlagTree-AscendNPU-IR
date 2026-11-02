@@ -2763,6 +2763,26 @@ FailureOr<SmallVector<Value>> HistogramOp::decomposeOperation(OpBuilder &b) {
   Value histInit =
       b.create<linalg::FillOp>(loc, zeroOut, histEmpty).getResult(0);
 
+  // Vector predicates can have a packed representation on Ascend. Materialize
+  // one integer per input element before extracting predicates in the loop.
+  Value maskAsInt;
+  Value zeroMask;
+  if (mask) {
+    auto maskTy = cast<RankedTensorType>(mask.getType());
+    SmallVector<Value> dynamicSizes;
+    for (int64_t dim = 0; dim < maskTy.getRank(); ++dim)
+      if (maskTy.isDynamicDim(dim))
+        dynamicSizes.push_back(b.create<tensor::DimOp>(loc, mask, dim));
+    Value maskEmpty = b.create<tensor::EmptyOp>(loc, maskTy.getShape(),
+                                                b.getI32Type(), dynamicSizes);
+    zeroMask = b.create<arith::ConstantOp>(loc, b.getI32IntegerAttr(0));
+    Value oneMask = b.create<arith::ConstantOp>(loc, b.getI32IntegerAttr(1));
+    Value zeros =
+        b.create<linalg::FillOp>(loc, zeroMask, maskEmpty).getResult(0);
+    Value ones = b.create<linalg::FillOp>(loc, oneMask, maskEmpty).getResult(0);
+    maskAsInt = b.create<arith::SelectOp>(loc, mask, ones, zeros);
+  }
+
   // Upper bound: number of elements in input
   Value ub = inTy.hasStaticShape() ? cstIdx(inTy.getDimSize(0))
                                    : b.create<tensor::DimOp>(loc, input, 0);
@@ -2787,7 +2807,10 @@ FailureOr<SmallVector<Value>> HistogramOp::decomposeOperation(OpBuilder &b) {
 
     Value maskCond;
     if (mask) {
-      maskCond = b.create<tensor::ExtractOp>(loc, mask, ValueRange{i});
+      Value maskElement =
+          b.create<tensor::ExtractOp>(loc, maskAsInt, ValueRange{i});
+      maskCond = b.create<arith::CmpIOp>(loc, arith::CmpIPredicate::ne,
+                                         maskElement, zeroMask);
     } else {
       maskCond = b.create<arith::ConstantIntOp>(loc, 1, 1);
     }
@@ -2801,10 +2824,12 @@ FailureOr<SmallVector<Value>> HistogramOp::decomposeOperation(OpBuilder &b) {
     Value oldVal = b.create<tensor::ExtractOp>(loc, hist, ValueRange{safeIdx});
     Value newVal = b.create<arith::AddIOp>(loc, oldVal, oneOut);
 
-    Value updatedHist =
-        b.create<tensor::InsertOp>(loc, newVal, hist, ValueRange{safeIdx});
+    // Select the bin value before insertion so there is only one loop-carried
+    // histogram buffer and a masked element performs an unchanged write.
+    Value selectedVal =
+        b.create<arith::SelectOp>(loc, writeMask, newVal, oldVal);
     Value resultHist =
-        b.create<arith::SelectOp>(loc, writeMask, updatedHist, hist);
+        b.create<tensor::InsertOp>(loc, selectedVal, hist, ValueRange{safeIdx});
 
     b.create<scf::YieldOp>(loc, resultHist);
   }
